@@ -1,0 +1,131 @@
+services:
+  # Kafka
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: mydb
+      MYSQL_USER: flinkuser
+      MYSQL_PASSWORD: flinkpw
+    ports:
+      - "3306:3306"
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - flink-network
+
+  # Adminer (optional DB UI)
+  adminer:
+    image: adminer
+    container_name: adminer
+    restart: always
+    ports:
+      - "8082:8080"
+    networks:
+      - flink-network
+      
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - flink-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    networks:
+      - flink-network
+
+  flink-jobmanager:
+    image: flink:1.20.1
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    depends_on:
+      - kafka
+      - mysql
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    networks:
+      - flink-network
+    volumes:
+      - ./target:/opt/flink/usrlib
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+
+  flink-taskmanager:
+    image: flink:1.20.1
+    container_name: flink-taskmanager
+    depends_on:
+      - kafka
+      - flink-jobmanager
+    command: taskmanager
+    networks:
+      - flink-network
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=2
+    volumes:
+      - ./target:/opt/flink/usrlib
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+      - flink-rocksdb:/opt/flink/rocksdb
+
+  flink-submit:
+    image: flink:1.20.1
+    container_name: flink-submit
+    networks:
+      - flink-network
+    depends_on:
+      - flink-jobmanager
+      - kafka
+    entrypoint: [ "/opt/flink/usrlib/flink.sh" ]
+    volumes:
+      - ./target:/opt/flink/usrlib
+      - ./scripts/flink.sh:/opt/flink/usrlib/flink.sh
+      - ./config/:/opt/flink/usrlib/config/
+      - flink-checkpoints:/opt/flink/checkpoints
+      - flink-savepoints:/opt/flink/savepoints
+    restart: on-failure
+
+  # Kafka UI for monitoring
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    networks:
+      - flink-network
+
+networks:
+  flink-network:
+    driver: bridge
+
+volumes:
+  flink-checkpoints:
+  flink-savepoints:
+  flink-rocksdb:
+  mysql-data:
