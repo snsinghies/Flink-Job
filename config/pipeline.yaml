@@ -1,0 +1,35 @@
+pipeline:
+  name: "user-address-enrichment-pipeline"
+  parallelism: 2
+  checkpointing:
+    enabled: true
+    interval: 5000
+
+source:
+  type: "kafka"
+  config:
+    kafka:
+      bootstrap_servers: "kafka:29092"
+      topics:
+        - "user-events"
+        - "address-events"
+      group_id: "user-enrichment-consumer"
+
+processors:
+  - type: "user_address_enrichment"
+    enabled: true
+    config:
+      timeout_seconds: 30
+      state_retention_minutes: 60
+      enable_partial_enrichment: true
+  - type: "deduplication-processor"
+    enabled: true
+    config:
+      timeout_minutes: 1
+
+sinks:
+  - type: "kafka"
+    enabled: true
+    config:
+      bootstrap_servers: "kafka:29092"
+      topic: "enriched-users"
